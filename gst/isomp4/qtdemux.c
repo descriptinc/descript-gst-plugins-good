@@ -5148,8 +5148,30 @@ gst_qtdemux_activate_segment (GstQTDemux * qtdemux, QtDemuxStream * stream,
   /* find keyframe of the target index */
   kf_index = gst_qtdemux_find_keyframe (qtdemux, stream, index, FALSE);
 
-/* *INDENT-OFF* */
-/* indent does stupid stuff with stream->samples[].timestamp */
+  /* go back two frames to provide lead-in for non-raw audio decoders */
+  if (stream->subtype == FOURCC_soun && !stream->need_clip) {
+    guint32 lead_in = 2;
+    guint32 old_index = kf_index;
+    GstStructure *s = gst_caps_get_structure (CUR_STREAM (stream)->caps, 0);
+
+    if (gst_structure_has_name (s, "audio/mpeg")) {
+      gint mpegversion;
+      if (gst_structure_get_int (s, "mpegversion", &mpegversion)
+          && mpegversion == 1) {
+        /* mp3 could need up to 30 frames of lead-in per mpegaudioparse */
+        lead_in = 30;
+      }
+    }
+
+    kf_index = MAX (kf_index, lead_in) - lead_in;
+    if (qtdemux_parse_samples (qtdemux, stream, kf_index)) {
+      GST_DEBUG_OBJECT (stream->pad,
+          "Moving backwards %u frames to ensure sufficient sound lead-in",
+          old_index - kf_index);
+    } else {
+      kf_index = old_index;
+    }
+  }
 
   /* if we move forwards, we don't have to go back to the previous
    * keyframe since we already sent that. We can also just jump to
@@ -5158,25 +5180,29 @@ gst_qtdemux_activate_segment (GstQTDemux * qtdemux, QtDemuxStream * stream,
     /* moving forwards check if we move past a keyframe */
     if (kf_index > stream->sample_index) {
       GST_DEBUG_OBJECT (stream->pad,
-           "moving forwards to keyframe at %u (pts %" GST_TIME_FORMAT " dts %"GST_TIME_FORMAT" )", kf_index,
-           GST_TIME_ARGS (QTSAMPLE_PTS(stream, &stream->samples[kf_index])),
-           GST_TIME_ARGS (QTSAMPLE_DTS(stream, &stream->samples[kf_index])));
+          "moving forwards to keyframe at %u "
+          "(pts %" GST_TIME_FORMAT " dts %" GST_TIME_FORMAT " )",
+          kf_index,
+          GST_TIME_ARGS (QTSAMPLE_PTS (stream, &stream->samples[kf_index])),
+          GST_TIME_ARGS (QTSAMPLE_DTS (stream, &stream->samples[kf_index])));
       gst_qtdemux_move_stream (qtdemux, stream, kf_index);
     } else {
       GST_DEBUG_OBJECT (stream->pad,
-          "moving forwards, keyframe at %u (pts %" GST_TIME_FORMAT " dts %"GST_TIME_FORMAT" ) already sent", kf_index,
+          "moving forwards, keyframe at %u "
+          "(pts %" GST_TIME_FORMAT " dts %" GST_TIME_FORMAT " ) already sent",
+          kf_index,
           GST_TIME_ARGS (QTSAMPLE_PTS (stream, &stream->samples[kf_index])),
           GST_TIME_ARGS (QTSAMPLE_DTS (stream, &stream->samples[kf_index])));
     }
   } else {
     GST_DEBUG_OBJECT (stream->pad,
-        "moving backwards to keyframe at %u (pts %" GST_TIME_FORMAT " dts %"GST_TIME_FORMAT" )", kf_index,
-        GST_TIME_ARGS (QTSAMPLE_PTS(stream, &stream->samples[kf_index])),
-        GST_TIME_ARGS (QTSAMPLE_DTS(stream, &stream->samples[kf_index])));
+        "moving backwards to %sframe at %u "
+        "(pts %" GST_TIME_FORMAT " dts %" GST_TIME_FORMAT " )",
+        (stream->subtype == FOURCC_soun) ? "audio " : "key", kf_index,
+        GST_TIME_ARGS (QTSAMPLE_PTS (stream, &stream->samples[kf_index])),
+        GST_TIME_ARGS (QTSAMPLE_DTS (stream, &stream->samples[kf_index])));
     gst_qtdemux_move_stream (qtdemux, stream, kf_index);
   }
-
-/* *INDENT-ON* */
 
   return TRUE;
 }
