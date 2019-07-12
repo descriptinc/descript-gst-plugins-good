@@ -529,7 +529,5 @@ gst_sbc_parse_pre_push_frame (GstBaseParse * parse, GstBaseParseFrame * frame)
     sbcparse->sent_codec_tag = TRUE;
   }
 
-  frame->flags |= GST_BASE_PARSE_FRAME_FLAG_CLIP;
-
   return GST_FLOW_OK;
 }
